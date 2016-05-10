@@ -102,18 +102,16 @@ class NearestNeighbor(AbstractClassifier):
         return "NearestNeighbor (k=%s, dist_metric=%s)" % (self.k, repr(self.dist_metric))
 
 # libsvm
-try:
-    from svmutil import *
-except ImportError:
-    logger = logging.getLogger("facerec.classifier.SVM")
-    logger.debug("Import Error: libsvm bindings not available.")
-except:
-    logger = logging.getLogger("facerec.classifier.SVM")
-    logger.debug("Import Error: libsvm bindings not available.")
-
+from svmutil import *
 import sys
 from StringIO import StringIO
+import cStringIO
 bkp_stdout=sys.stdout
+import tempfile
+import os
+
+suffix = "temp"
+prefix = tempfile.gettempprefix()
 
 class SVM(AbstractClassifier):
     """
@@ -138,7 +136,6 @@ class SVM(AbstractClassifier):
         self.logger = logging.getLogger("facerec.classifier.SVM")
         self.param = param
         self.svm = svm_model()
-        self.param = param
         if self.param is None:
             self.param = svm_parameter("-q")
     
@@ -150,6 +147,7 @@ class SVM(AbstractClassifier):
         problem = svm_problem(y, X.tolist())        
         self.svm = svm_train(problem, self.param)
         self.y = y
+        self.X = X
     
     def predict(self, X):
         """
@@ -182,8 +180,37 @@ class SVM(AbstractClassifier):
         sys.stdout=bkp_stdout
         predicted_label = int(p_lbl[0])
         return [predicted_label, { 'p_lbl' : p_lbl, 'p_acc' : p_acc, 'p_val' : p_val }]
-    
-    def __repr__(self):        
-        return "Support Vector Machine (kernel_type=%s, C=%.2f,gamma=%.2f,p=%.2f,nu=%.2f,coef=%.2f,degree=%.2f)" % (KERNEL_TYPE[self.param.kernel_type], self.param.C, self.param.gamma, self.param.p, self.param.nu, self.param.coef0, self.param.degree)
 
+    def generate_temp_file(self):
+        temp = tempfile.mkstemp(suffix=suffix, text=True)
+        file = os.path.join(tempfile.gettempdir(), suffix + "." + prefix)
+        return file
 
+    def __getstate__(self):
+        #A temp file is created to save data from libsvm
+        file = self.generate_temp_file()
+        svm_save_model(file, self.svm)
+        #The model is read to generate a string
+        buffer = cStringIO.StringIO()
+        with open(file) as file:
+            buffer.writelines(file.xreadlines())
+        #The object is built to save it
+        return{
+            "svm" : buffer.getvalue(),
+            "X" : self.X,
+            "y" : self.y,
+        }
+
+    def __setstate__(self, data):
+        self.__init__()
+        #A file is neccesary to read the model in data
+        buffer = data["svm"]
+        file = self.generate_temp_file()
+        with open(file,"w") as f:
+            f.writelines(buffer)
+        self.svm = svm_load_model(file)
+        self.X = data["X"]
+        self.y = data["y"]
+
+    def __repr__(self):
+        return "Support Vector Machine (kernel_type=%s, C=%.2f,gamma=%.2f,p=%.2f,nu=%.2f,coef=%.2f,degree=%.2f)" % (self.param.kernel_type, self.param.C, self.param.gamma, self.param.p, self.param.nu, self.param.coef0, self.param.degree)

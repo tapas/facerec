@@ -94,7 +94,7 @@ class ExtendedLBP(LocalDescriptor):
             N += w4*X[cy:cy+dy,cx:cx+dx]
             # update LBP codes        
             D = N >= C
-            result += (1<<i)*D
+            result += ((1<<i)*D).astype("uint32")
         return result
 
     @property
